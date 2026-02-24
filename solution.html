@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Non-Blocking Strategies</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; }
+        button { padding: 10px 20px; margin: 10px 0; font-size: 16px; cursor: pointer; }
+        .status { font-weight: bold; margin-bottom: 20px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
+        .interactive-area { padding: 15px; border: 2px dashed #ccc; background: #fafafa; }
+        input { padding: 8px; width: 80%; font-size: 16px; }
+        progress { width: 100%; height: 20px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>Non-Blocking Strategies Demo</h2>
+    
+    <div class="interactive-area">
+        <label for="test-input"><strong>Test UI Responsiveness:</strong></label><br><br>
+        <input type="text" id="test-input" placeholder="Type here during execution...">
+    </div>
+
+    <hr>
+
+    <h3>Strategy 1: Web Worker (True Multi-threading)</h3>
+    <button id="btn-worker">Start Worker Task (Heavy Math)</button>
+    <div id="status-worker" class="status">Worker Status: Ready</div>
+
+    <h3>Strategy 2: Time-Slicing (Chunking)</h3>
+    <button id="btn-chunk">Start Chunked Task</button>
+    <div id="status-chunk" class="status">Chunk Status: Ready</div>
+    <progress id="chunk-progress" value="0" max="100"></progress>
+
+    <script>
+        // --- STRATEGY 1: WEB WORKER ---
+        const btnWorker = document.getElementById('btn-worker');
+        const statusWorker = document.getElementById('status-worker');
+
+        // Inline Web Worker creation using a Blob (keeps this demo in one file)
+        const workerScript = `
+            self.onmessage = function(e) {
+                let count = 0;
+                // Simulate heavy CPU task (approx 3-5 seconds depending on hardware)
+                for (let i = 0; i < 5e9; i++) {
+                    count++;
+                }
+                self.postMessage('Calculation complete: ' + count);
+            };
+        `;
+        const blob = new Blob([workerScript], { type: 'application/javascript' });
+        const worker = new Worker(URL.createObjectURL(blob));
+
+        worker.onmessage = function(e) {
+            statusWorker.textContent = 'Worker Status: ' + e.data;
+            statusWorker.style.color = 'green';
+        };
+
+        btnWorker.addEventListener('click', () => {
+            statusWorker.textContent = 'Worker Status: Processing in background... (UI is free)';
+            statusWorker.style.color = 'orange';
+            worker.postMessage('start'); // Trigger worker
+        });
+
+
+        // --- STRATEGY 2: TIME-SLICING ---
+        const btnChunk = document.getElementById('btn-chunk');
+        const statusChunk = document.getElementById('status-chunk');
+        const progressBar = document.getElementById('chunk-progress');
+
+        btnChunk.addEventListener('click', () => {
+            statusChunk.textContent = 'Chunk Status: Processing in chunks... (UI is free)';
+            statusChunk.style.color = 'orange';
+            
+            const totalItems = 10000;
+            const chunkSize = 100;
+            let currentIndex = 0;
+
+            function processChunk() {
+                // Process a small batch
+                const end = Math.min(currentIndex + chunkSize, totalItems);
+                for (let i = currentIndex; i < end; i++) {
+                    // Simulate work for each item
+                    let temp = 0;
+                    for(let j = 0; j < 10000; j++) { temp += j; } 
+                }
+                
+                currentIndex = end;
+                
+                // Update UI safely
+                const progressPercentage = (currentIndex / totalItems) * 100;
+                progressBar.value = progressPercentage;
+
+                if (currentIndex < totalItems) {
+                    // Yield to the Event Loop, then process next chunk
+                    // requestAnimationFrame prioritizes rendering before the next chunk
+                    requestAnimationFrame(processChunk); 
+                } else {
+                    statusChunk.textContent = 'Chunk Status: Finished!';
+                    statusChunk.style.color = 'green';
+                }
+            }
+
+            // Start the first chunk
+            requestAnimationFrame(processChunk);
+        });
+    </script>
+</body>
+</html>
