@@ -14,14 +14,13 @@
         input { padding: 8px; flex-grow: 1; font-size: 16px; }
         progress { width: 100%; height: 20px; margin-top: 15px; }
         
+        /* CSS Animation removed. We will drive this with JS. */
         .spinner {
             width: 30px; height: 30px;
             border: 4px solid #ccc;
             border-top-color: #0056b3;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
         }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -29,7 +28,7 @@
     <h2>Execution Strategies (10-Second Tests)</h2>
 
     <div class="interactive-area">
-        <div class="spinner"></div>
+        <div class="spinner" id="js-spinner"></div>
         <input type="text" placeholder="Type here. If the spinner stops, the UI is blocked.">
     </div>
 
@@ -49,12 +48,24 @@
     <progress id="progress-bar" value="0" max="100"></progress>
 
     <script>
+        // --- JS-Driven Spinner (Relies on Main Thread) ---
+        const spinner = document.getElementById('js-spinner');
+        let rotation = 0;
+        function animateSpinner() {
+            rotation = (rotation + 10) % 360;
+            spinner.style.transform = `rotate(${rotation}deg)`;
+            // This will NOT fire if the Call Stack is blocked
+            requestAnimationFrame(animateSpinner);
+        }
+        animateSpinner();
+
+        // --- Core Application Logic ---
         const btnRun = document.getElementById('btn-run');
         const strategySelect = document.getElementById('strategy-select');
         const statusEl = document.getElementById('status');
         const progressBar = document.getElementById('progress-bar');
         
-        const TASK_DURATION_MS = 10000; // 10 seconds
+        const TASK_DURATION_MS = 10000; 
 
         // --- Setup Web Worker via Blob ---
         const workerScript = `
@@ -63,10 +74,9 @@
                 const start = Date.now();
                 let elapsed = 0;
                 
-                // Process in 100ms chunks to report progress back to the main thread
                 while (elapsed < duration) {
                     const chunkStart = Date.now();
-                    while (Date.now() - chunkStart < 100) {} // Block worker thread for 100ms
+                    while (Date.now() - chunkStart < 100) {} 
                     
                     elapsed = Date.now() - start;
                     self.postMessage({ progress: (elapsed / duration) * 100 });
@@ -87,7 +97,6 @@
             statusEl.textContent = 'Status: Processing for 10 seconds...';
             statusEl.style.color = 'orange';
 
-            // Allow UI to paint the reset state before starting work
             setTimeout(() => {
                 if (strategy === 'blocking') runBlocking();
                 else if (strategy === 'async') runAsyncTimer();
@@ -106,9 +115,9 @@
         // --- 1. Single-Thread: Synchronous Blocking ---
         function runBlocking() {
             const start = Date.now();
-            // Monopolizes Call Stack. Spinner stops. Input freezes.
             while (Date.now() - start < TASK_DURATION_MS) {
-                // CPU spins here
+                // Main thread completely deadlocked here.
+                // requestAnimationFrame cannot execute, so spinner freezes.
             }
             completeTask();
         }
@@ -116,8 +125,6 @@
         // --- 2. Single-Thread: Async Timer ---
         function runAsyncTimer() {
             const start = Date.now();
-            
-            // Updates progress visually, but does no actual CPU math
             const interval = setInterval(() => {
                 const elapsed = Date.now() - start;
                 progressBar.value = (elapsed / TASK_DURATION_MS) * 100;
@@ -135,27 +142,23 @@
             
             function processChunk() {
                 const chunkStart = Date.now();
-                // Block the main thread for 50ms (simulating heavy math chunk)
                 while (Date.now() - chunkStart < 50) {} 
                 
                 const elapsed = Date.now() - start;
                 progressBar.value = (elapsed / TASK_DURATION_MS) * 100;
 
                 if (elapsed < TASK_DURATION_MS) {
-                    // Yield to Event Loop so UI can update, then run next chunk
                     setTimeout(processChunk, 0); 
                 } else {
                     completeTask();
                 }
             }
-
             processChunk();
         }
 
         // --- 4. Multi-Thread: Web Worker ---
         function runWebWorker() {
             worker.postMessage(TASK_DURATION_MS);
-            
             worker.onmessage = function(e) {
                 if (e.data.complete) {
                     completeTask();
