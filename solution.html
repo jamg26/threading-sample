@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JavaScript Threading Strategies</title>
+    <title>JavaScript Execution Strategies</title>
     <style>
         body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; line-height: 1.5; }
         .control-panel { background: #f0f0f0; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
-        select, button { padding: 10px; font-size: 16px; margin-top: 10px; }
-        button { cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; }
+        select, button { padding: 10px; font-size: 16px; margin-top: 10px; width: 100%; box-sizing: border-box; }
+        button { cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; font-weight: bold; }
         button:disabled { background: #ccc; cursor: not-allowed; }
         .interactive-area { padding: 15px; border: 2px dashed #ccc; background: #fafafa; display: flex; align-items: center; gap: 15px; }
         input { padding: 8px; flex-grow: 1; font-size: 16px; }
         progress { width: 100%; height: 20px; margin-top: 15px; }
         
-        /* CSS Spinner to visually demonstrate UI thread blocking */
         .spinner {
             width: 30px; height: 30px;
             border: 4px solid #ccc;
@@ -27,7 +26,7 @@
 </head>
 <body>
 
-    <h2>Execution Strategies Demo</h2>
+    <h2>Execution Strategies (10-Second Tests)</h2>
 
     <div class="interactive-area">
         <div class="spinner"></div>
@@ -37,12 +36,13 @@
     <div class="control-panel">
         <label for="strategy-select"><strong>Select Execution Strategy:</strong></label><br>
         <select id="strategy-select">
-            <option value="blocking">1. Synchronous (Blocks Main Thread)</option>
-            <option value="slicing">2. Time-Slicing (Yields to Main Thread)</option>
-            <option value="worker">3. Web Worker (Offloads to OS Thread)</option>
+            <option value="blocking">1. Single-Thread: Synchronous Blocking (10s CPU hang)</option>
+            <option value="async">2. Single-Thread: Async Timer (10s wait, no CPU hang)</option>
+            <option value="slicing">3. Single-Thread: Time-Slicing (10s CPU work, chunked)</option>
+            <option value="worker">4. Multi-Thread: Web Worker (10s CPU work, offloaded)</option>
         </select>
         <br>
-        <button id="btn-run">Run Heavy Task</button>
+        <button id="btn-run">Run 10-Second Task</button>
     </div>
 
     <div id="status">Status: Ready</div>
@@ -53,17 +53,26 @@
         const strategySelect = document.getElementById('strategy-select');
         const statusEl = document.getElementById('status');
         const progressBar = document.getElementById('progress-bar');
-
-        // Total iterations for the heavy task (adjust if your machine runs it too fast/slow)
-        const TOTAL_WORK = 5e8; 
+        
+        const TASK_DURATION_MS = 10000; // 10 seconds
 
         // --- Setup Web Worker via Blob ---
         const workerScript = `
             self.onmessage = function(e) {
-                const total = e.data;
-                let count = 0;
-                for (let i = 0; i < total; i++) { count++; }
-                self.postMessage(count);
+                const duration = e.data;
+                const start = Date.now();
+                let elapsed = 0;
+                
+                // Process in 100ms chunks to report progress back to the main thread
+                while (elapsed < duration) {
+                    const chunkStart = Date.now();
+                    while (Date.now() - chunkStart < 100) {} // Block worker thread for 100ms
+                    
+                    elapsed = Date.now() - start;
+                    self.postMessage({ progress: (elapsed / duration) * 100 });
+                }
+                
+                self.postMessage({ complete: true });
             };
         `;
         const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
@@ -73,21 +82,17 @@
         btnRun.addEventListener('click', () => {
             const strategy = strategySelect.value;
             
-            // Reset UI
             btnRun.disabled = true;
             progressBar.value = 0;
-            statusEl.textContent = 'Status: Processing...';
+            statusEl.textContent = 'Status: Processing for 10 seconds...';
             statusEl.style.color = 'orange';
 
             // Allow UI to paint the reset state before starting work
             setTimeout(() => {
-                if (strategy === 'blocking') {
-                    runBlocking();
-                } else if (strategy === 'slicing') {
-                    runTimeSlicing();
-                } else if (strategy === 'worker') {
-                    runWebWorker();
-                }
+                if (strategy === 'blocking') runBlocking();
+                else if (strategy === 'async') runAsyncTimer();
+                else if (strategy === 'slicing') runTimeSlicing();
+                else if (strategy === 'worker') runWebWorker();
             }, 50);
         });
 
@@ -98,58 +103,65 @@
             btnRun.disabled = false;
         }
 
-        // --- Strategy 1: Synchronous Blocking ---
+        // --- 1. Single-Thread: Synchronous Blocking ---
         function runBlocking() {
-            let count = 0;
-            // This loop monopolizes the Call Stack. The CSS spinner will freeze.
-            for (let i = 0; i < TOTAL_WORK; i++) {
-                count++;
+            const start = Date.now();
+            // Monopolizes Call Stack. Spinner stops. Input freezes.
+            while (Date.now() - start < TASK_DURATION_MS) {
+                // CPU spins here
             }
             completeTask();
         }
 
-        // --- Strategy 2: Time-Slicing (Chunking) ---
-        function runTimeSlicing() {
-            const chunkSize = 1e7; // Process in chunks
-            let current = 0;
-            let count = 0;
-
-            function processNextChunk() {
-                const end = Math.min(current + chunkSize, TOTAL_WORK);
+        // --- 2. Single-Thread: Async Timer ---
+        function runAsyncTimer() {
+            const start = Date.now();
+            
+            // Updates progress visually, but does no actual CPU math
+            const interval = setInterval(() => {
+                const elapsed = Date.now() - start;
+                progressBar.value = (elapsed / TASK_DURATION_MS) * 100;
                 
-                for (let i = current; i < end; i++) {
-                    count++;
+                if (elapsed >= TASK_DURATION_MS) {
+                    clearInterval(interval);
+                    completeTask();
                 }
-                
-                current = end;
-                progressBar.value = (current / TOTAL_WORK) * 100;
+            }, 100);
+        }
 
-                if (current < TOTAL_WORK) {
-                    // Yield control to Event Loop via setTimeout so the browser can render the spinner/input
-                    setTimeout(processNextChunk, 0); 
+        // --- 3. Single-Thread: Time-Slicing (Chunking) ---
+        function runTimeSlicing() {
+            const start = Date.now();
+            
+            function processChunk() {
+                const chunkStart = Date.now();
+                // Block the main thread for 50ms (simulating heavy math chunk)
+                while (Date.now() - chunkStart < 50) {} 
+                
+                const elapsed = Date.now() - start;
+                progressBar.value = (elapsed / TASK_DURATION_MS) * 100;
+
+                if (elapsed < TASK_DURATION_MS) {
+                    // Yield to Event Loop so UI can update, then run next chunk
+                    setTimeout(processChunk, 0); 
                 } else {
                     completeTask();
                 }
             }
 
-            processNextChunk();
+            processChunk();
         }
 
-        // --- Strategy 3: Web Worker ---
+        // --- 4. Multi-Thread: Web Worker ---
         function runWebWorker() {
-            // Send instruction to background thread
-            worker.postMessage(TOTAL_WORK);
+            worker.postMessage(TASK_DURATION_MS);
             
-            // Artificial progress update since the worker doesn't report progress in this simple demo
-            let fakeProgress = 0;
-            const progressInterval = setInterval(() => {
-                fakeProgress = Math.min(fakeProgress + 5, 95);
-                progressBar.value = fakeProgress;
-            }, 100);
-
             worker.onmessage = function(e) {
-                clearInterval(progressInterval);
-                completeTask();
+                if (e.data.complete) {
+                    completeTask();
+                } else {
+                    progressBar.value = e.data.progress;
+                }
             };
         }
     </script>
