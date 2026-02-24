@@ -3,108 +3,155 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Non-Blocking Strategies</title>
+    <title>JavaScript Threading Strategies</title>
     <style>
-        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; }
-        button { padding: 10px 20px; margin: 10px 0; font-size: 16px; cursor: pointer; }
-        .status { font-weight: bold; margin-bottom: 20px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
-        .interactive-area { padding: 15px; border: 2px dashed #ccc; background: #fafafa; }
-        input { padding: 8px; width: 80%; font-size: 16px; }
-        progress { width: 100%; height: 20px; margin-top: 10px; }
+        body { font-family: system-ui, sans-serif; padding: 20px; max-width: 600px; line-height: 1.5; }
+        .control-panel { background: #f0f0f0; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        select, button { padding: 10px; font-size: 16px; margin-top: 10px; }
+        button { cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .interactive-area { padding: 15px; border: 2px dashed #ccc; background: #fafafa; display: flex; align-items: center; gap: 15px; }
+        input { padding: 8px; flex-grow: 1; font-size: 16px; }
+        progress { width: 100%; height: 20px; margin-top: 15px; }
+        
+        /* CSS Spinner to visually demonstrate UI thread blocking */
+        .spinner {
+            width: 30px; height: 30px;
+            border: 4px solid #ccc;
+            border-top-color: #0056b3;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <h2>Non-Blocking Strategies Demo</h2>
-    
+    <h2>Execution Strategies Demo</h2>
+
     <div class="interactive-area">
-        <label for="test-input"><strong>Test UI Responsiveness:</strong></label><br><br>
-        <input type="text" id="test-input" placeholder="Type here during execution...">
+        <div class="spinner"></div>
+        <input type="text" placeholder="Type here. If the spinner stops, the UI is blocked.">
     </div>
 
-    <hr>
+    <div class="control-panel">
+        <label for="strategy-select"><strong>Select Execution Strategy:</strong></label><br>
+        <select id="strategy-select">
+            <option value="blocking">1. Synchronous (Blocks Main Thread)</option>
+            <option value="slicing">2. Time-Slicing (Yields to Main Thread)</option>
+            <option value="worker">3. Web Worker (Offloads to OS Thread)</option>
+        </select>
+        <br>
+        <button id="btn-run">Run Heavy Task</button>
+    </div>
 
-    <h3>Strategy 1: Web Worker (True Multi-threading)</h3>
-    <button id="btn-worker">Start Worker Task (Heavy Math)</button>
-    <div id="status-worker" class="status">Worker Status: Ready</div>
-
-    <h3>Strategy 2: Time-Slicing (Chunking)</h3>
-    <button id="btn-chunk">Start Chunked Task</button>
-    <div id="status-chunk" class="status">Chunk Status: Ready</div>
-    <progress id="chunk-progress" value="0" max="100"></progress>
+    <div id="status">Status: Ready</div>
+    <progress id="progress-bar" value="0" max="100"></progress>
 
     <script>
-        // --- STRATEGY 1: WEB WORKER ---
-        const btnWorker = document.getElementById('btn-worker');
-        const statusWorker = document.getElementById('status-worker');
+        const btnRun = document.getElementById('btn-run');
+        const strategySelect = document.getElementById('strategy-select');
+        const statusEl = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
 
-        // Inline Web Worker creation using a Blob (keeps this demo in one file)
+        // Total iterations for the heavy task (adjust if your machine runs it too fast/slow)
+        const TOTAL_WORK = 5e8; 
+
+        // --- Setup Web Worker via Blob ---
         const workerScript = `
             self.onmessage = function(e) {
+                const total = e.data;
                 let count = 0;
-                // Simulate heavy CPU task (approx 3-5 seconds depending on hardware)
-                for (let i = 0; i < 5e9; i++) {
-                    count++;
-                }
-                self.postMessage('Calculation complete: ' + count);
+                for (let i = 0; i < total; i++) { count++; }
+                self.postMessage(count);
             };
         `;
-        const blob = new Blob([workerScript], { type: 'application/javascript' });
-        const worker = new Worker(URL.createObjectURL(blob));
+        const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+        const worker = new Worker(URL.createObjectURL(workerBlob));
 
-        worker.onmessage = function(e) {
-            statusWorker.textContent = 'Worker Status: ' + e.data;
-            statusWorker.style.color = 'green';
-        };
+        // --- Execution Controller ---
+        btnRun.addEventListener('click', () => {
+            const strategy = strategySelect.value;
+            
+            // Reset UI
+            btnRun.disabled = true;
+            progressBar.value = 0;
+            statusEl.textContent = 'Status: Processing...';
+            statusEl.style.color = 'orange';
 
-        btnWorker.addEventListener('click', () => {
-            statusWorker.textContent = 'Worker Status: Processing in background... (UI is free)';
-            statusWorker.style.color = 'orange';
-            worker.postMessage('start'); // Trigger worker
+            // Allow UI to paint the reset state before starting work
+            setTimeout(() => {
+                if (strategy === 'blocking') {
+                    runBlocking();
+                } else if (strategy === 'slicing') {
+                    runTimeSlicing();
+                } else if (strategy === 'worker') {
+                    runWebWorker();
+                }
+            }, 50);
         });
 
+        function completeTask() {
+            progressBar.value = 100;
+            statusEl.textContent = 'Status: Completed!';
+            statusEl.style.color = 'green';
+            btnRun.disabled = false;
+        }
 
-        // --- STRATEGY 2: TIME-SLICING ---
-        const btnChunk = document.getElementById('btn-chunk');
-        const statusChunk = document.getElementById('status-chunk');
-        const progressBar = document.getElementById('chunk-progress');
+        // --- Strategy 1: Synchronous Blocking ---
+        function runBlocking() {
+            let count = 0;
+            // This loop monopolizes the Call Stack. The CSS spinner will freeze.
+            for (let i = 0; i < TOTAL_WORK; i++) {
+                count++;
+            }
+            completeTask();
+        }
 
-        btnChunk.addEventListener('click', () => {
-            statusChunk.textContent = 'Chunk Status: Processing in chunks... (UI is free)';
-            statusChunk.style.color = 'orange';
-            
-            const totalItems = 10000;
-            const chunkSize = 100;
-            let currentIndex = 0;
+        // --- Strategy 2: Time-Slicing (Chunking) ---
+        function runTimeSlicing() {
+            const chunkSize = 1e7; // Process in chunks
+            let current = 0;
+            let count = 0;
 
-            function processChunk() {
-                // Process a small batch
-                const end = Math.min(currentIndex + chunkSize, totalItems);
-                for (let i = currentIndex; i < end; i++) {
-                    // Simulate work for each item
-                    let temp = 0;
-                    for(let j = 0; j < 10000; j++) { temp += j; } 
+            function processNextChunk() {
+                const end = Math.min(current + chunkSize, TOTAL_WORK);
+                
+                for (let i = current; i < end; i++) {
+                    count++;
                 }
                 
-                currentIndex = end;
-                
-                // Update UI safely
-                const progressPercentage = (currentIndex / totalItems) * 100;
-                progressBar.value = progressPercentage;
+                current = end;
+                progressBar.value = (current / TOTAL_WORK) * 100;
 
-                if (currentIndex < totalItems) {
-                    // Yield to the Event Loop, then process next chunk
-                    // requestAnimationFrame prioritizes rendering before the next chunk
-                    requestAnimationFrame(processChunk); 
+                if (current < TOTAL_WORK) {
+                    // Yield control to Event Loop via setTimeout so the browser can render the spinner/input
+                    setTimeout(processNextChunk, 0); 
                 } else {
-                    statusChunk.textContent = 'Chunk Status: Finished!';
-                    statusChunk.style.color = 'green';
+                    completeTask();
                 }
             }
 
-            // Start the first chunk
-            requestAnimationFrame(processChunk);
-        });
+            processNextChunk();
+        }
+
+        // --- Strategy 3: Web Worker ---
+        function runWebWorker() {
+            // Send instruction to background thread
+            worker.postMessage(TOTAL_WORK);
+            
+            // Artificial progress update since the worker doesn't report progress in this simple demo
+            let fakeProgress = 0;
+            const progressInterval = setInterval(() => {
+                fakeProgress = Math.min(fakeProgress + 5, 95);
+                progressBar.value = fakeProgress;
+            }, 100);
+
+            worker.onmessage = function(e) {
+                clearInterval(progressInterval);
+                completeTask();
+            };
+        }
     </script>
 </body>
 </html>
