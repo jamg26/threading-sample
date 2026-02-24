@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Node.js Single Thread Demo</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        #log { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; margin-top: 20px; background: #f9f9f9; }
+        .log-entry { margin: 5px 0; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+    <h1>Node.js Single Thread Blocking vs Non-Blocking Demo</h1>
+    
+    <div>
+        <h3>1. Blocking Demo</h3>
+        <p>Click "Start Blocking (10s)" and immediately try to click "Ping Server". The ping will hang until the blocking operation finishes.</p>
+        <button onclick="triggerBlocking()">Start Blocking (10s)</button>
+    </div>
+
+    <div>
+        <h3>2. Non-Blocking Demo</h3>
+        <p>Click "Start Non-Blocking (10s)" and immediately try to click "Ping Server". The ping will respond immediately while the operation runs in the background.</p>
+        <button onclick="triggerNonBlocking()">Start Non-Blocking (10s)</button>
+    </div>
+
+    <div>
+        <h3>Test Responsiveness</h3>
+        <button onclick="pingServer()">Ping Server</button>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        const logDiv = document.getElementById('log');
+
+        function log(message) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.prepend(entry);
+        }
+
+        async function triggerBlocking() {
+            log('--> Requesting /blocking...');
+            try {
+                const start = performance.now();
+                const response = await fetch('/blocking');
+                const text = await response.text();
+                const duration = ((performance.now() - start) / 1000).toFixed(2);
+                log(`<-- Blocking response: ${text} (${duration}s)`);
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+
+        async function triggerNonBlocking() {
+            log('--> Requesting /non-blocking...');
+            try {
+                const start = performance.now();
+                const response = await fetch('/non-blocking');
+                const text = await response.text();
+                const duration = ((performance.now() - start) / 1000).toFixed(2);
+                log(`<-- Non-blocking response: ${text} (${duration}s)`);
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+
+        async function pingServer() {
+            log('--> Pinging server...');
+            try {
+                const start = performance.now();
+                const response = await fetch('/ping');
+                const text = await response.text();
+                const duration = ((performance.now() - start) / 1000).toFixed(2);
+                log(`<-- Ping response: ${text} (${duration}s)`);
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
